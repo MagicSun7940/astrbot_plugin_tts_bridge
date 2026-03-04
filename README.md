@@ -8,6 +8,26 @@ AstrBot 插件：多语言文字 + 语音桥接
 
 ---
 
+## 更新日志
+
+### v1.2.0
+- `/ttsb` 不带子命令时直接显示帮助界面（与 `/ttsb help` 效果相同）
+
+### v1.1.0
+- 指令重构：原 `/ttsbridge` 系列指令改为 `/ttsb on`、`/ttsb off`、`/ttsb help`
+- 新增指令组 `ttsb`，在 AstrBot 行为管理中统一归属 `tts_bridge` 文件夹显示
+- 新增 `debug_mode` 调试模式配置项
+- 新增 `filter_regex` 过滤规则配置项，过滤规则完全可配置
+
+### v1.0.0
+- 初始版本
+- 支持中文回复 + 日语 TTS 语音
+- 翻译供应商：OpenAI 兼容格式（硅基流动、DeepSeek、OpenAI 等）
+- TTS 供应商：MiniMax
+- 策略模式设计，支持多供应商扩展
+
+---
+
 ## 工作原理
 
 1. 拦截 AI 的文字回复
@@ -61,6 +81,7 @@ AstrBot/data/plugins/astrbot_plugin_tts_bridge/
 |--------|------|--------|
 | `enable_translate` | 是否启用翻译。关闭后直接对原文进行 TTS | `true` |
 | `filter_regex` | 过滤正则表达式，匹配到的内容不会被朗读。留空则不过滤 | 过滤中文括号及其中内容 |
+| `debug_mode` | 调试模式，见下方说明 | `false` |
 
 **filter_regex 示例：**
 ```
@@ -71,8 +92,18 @@ AstrBot/data/plugins/astrbot_plugin_tts_bridge/
 [（(【][^）)】]*[）)】]
 
 # 不过滤任何内容（留空即可）
-
 ```
+
+### 调试模式（debug_mode）
+
+开启后，每次 TTS 处理时会在 AstrBot 日志中输出以下信息，方便排查翻译错误或语音合成异常：
+
+- `[DEBUG] 原始文本`：AI 回复的原始文字
+- `[DEBUG] 过滤后文本`：经正则过滤后的文字（若有变化才输出）
+- `[DEBUG] 翻译后文本`：翻译 API 返回的结果
+- `[DEBUG] 发送给 TTS 的文本`：最终发送给语音合成的文字
+
+日志可在 AstrBot 控制台或服务器日志文件中查看。
 
 ### 翻译配置
 
@@ -110,10 +141,14 @@ AstrBot/data/plugins/astrbot_plugin_tts_bridge/
 
 ## 使用指令
 
+所有指令归属于 `tts_bridge` 指令组，在 AstrBot 行为管理中统一显示。
+
 | 指令 | 说明 |
 |------|------|
-| `/ttsbridge` | 开启当前会话的语音桥接 |
-| `/ttsbridge_off` | 关闭当前会话的语音桥接 |
+| `/ttsb` | 查看帮助信息 |
+| `/ttsb help` | 查看帮助信息 |
+| `/ttsb on` | 开启当前会话的语音桥接 |
+| `/ttsb off` | 关闭当前会话的语音桥接 |
 
 ---
 
@@ -143,4 +178,4 @@ class MyTTSProvider(TTSProvider):
         ...
 ```
 
-然后在 `_init_providers` 方法中注册新供应商即可。
+然后在 `_init_providers` 方法中注册新供应商，并在 `_conf_schema.json` 中添加对应配置项即可。

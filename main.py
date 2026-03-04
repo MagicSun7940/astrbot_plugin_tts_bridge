@@ -94,10 +94,27 @@ class MinimaxTTSProvider(TTSProvider):
 
 
 # ─────────────────────────────────────────────
+# 帮助文本
+# ─────────────────────────────────────────────
+
+HELP_TEXT = (
+    "📖 tts_bridge 插件指令列表\n"
+    "─────────────────\n"
+    "/ttsb          查看此帮助信息\n"
+    "/ttsb help     查看此帮助信息\n"
+    "/ttsb on       开启当前会话的语音桥接\n"
+    "/ttsb off      关闭当前会话的语音桥接\n"
+    "─────────────────\n"
+    "功能说明：将 AI 文字回复翻译为目标语言后进行 TTS 语音合成，"
+    "实现文字与语音使用不同语言的效果。"
+)
+
+
+# ─────────────────────────────────────────────
 # 插件主体
 # ─────────────────────────────────────────────
 
-@register("astrbot_plugin_tts_bridge", "magic-sun", "多语言文字+语音桥接插件，支持翻译后TTS合成", "1.0.0")
+@register("astrbot_plugin_tts_bridge", "magic-sun", "多语言文字+语音桥接插件，支持翻译后TTS合成", "1.2.0")
 class TtsBridgePlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig):
         super().__init__(context)
@@ -108,7 +125,6 @@ class TtsBridgePlugin(Star):
         self._init_providers()
 
     def _init_providers(self):
-        # 初始化翻译供应商
         tp = self.config.get("translate_provider", "openai_compat")
         if tp == "openai_compat":
             self.translate_provider = OpenAICompatTranslateProvider(
@@ -118,7 +134,6 @@ class TtsBridgePlugin(Star):
                 prompt=self.config.get("translate_prompt", "请将以下文本翻译成日语。只输出翻译结果，不要添加任何解释或其他内容。")
             )
 
-        # 初始化TTS供应商
         tp2 = self.config.get("tts_provider", "minimax")
         if tp2 == "minimax":
             self.tts_provider = MinimaxTTSProvider(
@@ -128,16 +143,27 @@ class TtsBridgePlugin(Star):
                 model=self.config.get("minimax_model", "speech-2.8-turbo")
             )
 
-    @filter.command("ttsbridge")
-    async def enable_tts(self, event: AstrMessageEvent):
-        """开启语音桥接：/ttsbridge"""
-        self._init_providers()  # 每次开启时重新加载配置
-        self.enabled_sessions.add(event.unified_msg_origin)
-        yield event.plain_result("✅ 语音桥接已开启。关闭请发 /ttsbridge_off")
+    def _debug(self, msg: str):
+        if self.config.get("debug_mode", False):
+            logger.info(f"[DEBUG] {msg}")
 
-    @filter.command("ttsbridge_off")
+    @filter.command_group("ttsb", alias=set(), desc="tts_bridge 插件")
+    async def ttsb_group(self, event: AstrMessageEvent):
+        """不带子命令时直接显示帮助"""
+        yield event.plain_result(HELP_TEXT)
+
+    @ttsb_group.command("help", desc="查看所有指令及其作用")
+    async def help_tts(self, event: AstrMessageEvent):
+        yield event.plain_result(HELP_TEXT)
+
+    @ttsb_group.command("on", desc="开启当前会话的语音桥接")
+    async def enable_tts(self, event: AstrMessageEvent):
+        self._init_providers()
+        self.enabled_sessions.add(event.unified_msg_origin)
+        yield event.plain_result("✅ 语音桥接已开启。发送 /ttsb off 可关闭。")
+
+    @ttsb_group.command("off", desc="关闭当前会话的语音桥接")
     async def disable_tts(self, event: AstrMessageEvent):
-        """关闭语音桥接：/ttsbridge_off"""
         self.enabled_sessions.discard(event.unified_msg_origin)
         yield event.plain_result("🔇 语音桥接已关闭。")
 
@@ -146,7 +172,6 @@ class TtsBridgePlugin(Star):
         if event.unified_msg_origin not in self.enabled_sessions:
             return
 
-        # 提取文本
         text = ""
         for comp in resp.result_chain.chain:
             if hasattr(comp, "text"):
@@ -154,11 +179,15 @@ class TtsBridgePlugin(Star):
         if not text:
             return
 
-        # 按配置的正则过滤内容
+        self._debug(f"原始文本: {text}")
+
         filter_regex = self.config.get("filter_regex", r'[（(][^）)]*[）)]')
         if filter_regex:
             try:
-                text = re.sub(filter_regex, '', text).strip()
+                filtered = re.sub(filter_regex, '', text).strip()
+                if filtered != text:
+                    self._debug(f"过滤后文本: {filtered}")
+                text = filtered
             except re.error as e:
                 logger.warning(f"过滤正则表达式有误: {e}，已跳过过滤")
 
@@ -166,13 +195,15 @@ class TtsBridgePlugin(Star):
             return
 
         try:
-            # 翻译
             if self.config.get("enable_translate", True) and self.translate_provider:
-                text = await self.translate_provider.translate(text)
-                if not text:
+                translated = await self.translate_provider.translate(text)
+                self._debug(f"翻译后文本: {translated}")
+                if not translated:
                     return
+                text = translated
 
-            # TTS 合成
+            self._debug(f"发送给 TTS 的文本: {text}")
+
             if not self.tts_provider:
                 logger.error("TTS 供应商未初始化，请检查配置")
                 return
