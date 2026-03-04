@@ -1,0 +1,62 @@
+{
+  "enable_translate": {
+    "description": "是否启用翻译功能。关闭后将直接对原文进行 TTS 合成",
+    "type": "bool",
+    "default": true
+  },
+  "filter_regex": {
+    "description": "发送给 TTS 前过滤文本的正则表达式。默认过滤中文括号及其中内容（动作描写）。留空则不过滤",
+    "type": "string",
+    "default": "[（(][^）)]*[）)]"
+  },
+  "translate_provider": {
+    "description": "翻译供应商。目前支持：openai_compat（兼容 OpenAI 格式，适用于硅基流动、DeepSeek、OpenAI 等）",
+    "type": "string",
+    "default": "openai_compat"
+  },
+  "translate_api_key": {
+    "description": "翻译 API Key",
+    "type": "string",
+    "default": ""
+  },
+  "translate_base_url": {
+    "description": "翻译 API Base URL（硅基流动填 https://api.siliconflow.cn/v1）",
+    "type": "string",
+    "default": "https://api.siliconflow.cn/v1"
+  },
+  "translate_model": {
+    "description": "翻译使用的模型",
+    "type": "string",
+    "default": "Qwen/Qwen2.5-7B-Instruct"
+  },
+  "translate_prompt": {
+    "description": "翻译系统提示词，可自定义翻译目标语言和风格",
+    "type": "string",
+    "default": "请将以下文本翻译成日语。只输出翻译结果，不要添加任何解释或其他内容。"
+  },
+  "tts_provider": {
+    "description": "TTS 供应商。目前支持：minimax",
+    "type": "string",
+    "default": "minimax"
+  },
+  "minimax_api_key": {
+    "description": "MiniMax API Key",
+    "type": "string",
+    "default": ""
+  },
+  "minimax_group_id": {
+    "description": "MiniMax Group ID（账户管理 → 基本信息中可见）",
+    "type": "string",
+    "default": ""
+  },
+  "minimax_voice_id": {
+    "description": "MiniMax 音色 ID（克隆音色填写克隆时指定的名称，如 kisaki_2026）",
+    "type": "string",
+    "default": ""
+  },
+  "minimax_model": {
+    "description": "MiniMax TTS 模型（推荐 speech-2.8-turbo）",
+    "type": "string",
+    "default": "speech-2.8-turbo"
+  }
+}
