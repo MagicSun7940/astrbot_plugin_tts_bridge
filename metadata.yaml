@@ -1,5 +1,5 @@
 name: astrbot_plugin_tts_bridge
 desc: 多语言文字+语音桥接插件。将 AI 回复翻译为目标语言后进行 TTS 合成，实现文字与语音使用不同语言。支持多供应商扩展。
 author: magic-sun
-version: 1.3.0
+version: 1.3.1
 repo: ""
