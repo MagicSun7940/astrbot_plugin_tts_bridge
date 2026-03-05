@@ -12,6 +12,12 @@ import astrbot.api.message_components as Comp
 
 logger = logging.getLogger("astrbot_plugin_tts_bridge")
 
+# 过滤翻译API可能附加的语言标注，如 (Japanese)、[Japanese]、（日语）等
+_LANG_TAG_PATTERN = re.compile(
+    r'[\(\[（【][\s]*(?:japanese|japanese translation|日语|日文|ja|jp)[\s]*[\)\]）】]',
+    re.IGNORECASE
+)
+
 
 # ─────────────────────────────────────────────
 # 翻译供应商抽象接口
@@ -114,7 +120,7 @@ HELP_TEXT = (
 # 插件主体
 # ─────────────────────────────────────────────
 
-@register("astrbot_plugin_tts_bridge", "magic-sun", "多语言文字+语音桥接插件，支持翻译后TTS合成", "1.2.0")
+@register("astrbot_plugin_tts_bridge", "magic-sun", "多语言文字+语音桥接插件，支持翻译后TTS合成", "1.3.0")
 class TtsBridgePlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig):
         super().__init__(context)
@@ -144,8 +150,9 @@ class TtsBridgePlugin(Star):
             )
 
     def _debug(self, msg: str):
+        """debug模式下输出日志，使用WARNING级别确保不被过滤"""
         if self.config.get("debug_mode", False):
-            logger.info(f"[DEBUG] {msg}")
+            logger.warning(f"[TTS_BRIDGE DEBUG] {msg}")
 
     @filter.command_group("ttsb", alias=set(), desc="tts_bridge 插件")
     async def ttsb_group(self, event: AstrMessageEvent):
@@ -181,6 +188,7 @@ class TtsBridgePlugin(Star):
 
         self._debug(f"原始文本: {text}")
 
+        # 按配置的正则过滤
         filter_regex = self.config.get("filter_regex", r'[（(][^）)]*[）)]')
         if filter_regex:
             try:
@@ -189,7 +197,7 @@ class TtsBridgePlugin(Star):
                     self._debug(f"过滤后文本: {filtered}")
                 text = filtered
             except re.error as e:
-                logger.warning(f"过滤正则表达式有误: {e}，已跳过过滤")
+                logger.warning(f"[TTS_BRIDGE] 过滤正则表达式有误: {e}，已跳过过滤")
 
         if not text:
             return
@@ -197,7 +205,12 @@ class TtsBridgePlugin(Star):
         try:
             if self.config.get("enable_translate", True) and self.translate_provider:
                 translated = await self.translate_provider.translate(text)
-                self._debug(f"翻译后文本: {translated}")
+                self._debug(f"翻译后原始返回: {translated}")
+
+                # 过滤翻译API可能附加的语言标注
+                translated = _LANG_TAG_PATTERN.sub('', translated).strip()
+                self._debug(f"翻译后清洗文本: {translated}")
+
                 if not translated:
                     return
                 text = translated
@@ -205,7 +218,7 @@ class TtsBridgePlugin(Star):
             self._debug(f"发送给 TTS 的文本: {text}")
 
             if not self.tts_provider:
-                logger.error("TTS 供应商未初始化，请检查配置")
+                logger.warning("[TTS_BRIDGE] TTS 供应商未初始化，请检查配置")
                 return
             audio_path = await self.tts_provider.synthesize(text)
             if not audio_path:
@@ -214,4 +227,4 @@ class TtsBridgePlugin(Star):
             resp.result_chain.chain.insert(0, Comp.Record(file=audio_path))
 
         except Exception as e:
-            logger.error(f"TTS Bridge 失败: {e}")
+            logger.warning(f"[TTS_BRIDGE] 失败: {e}")

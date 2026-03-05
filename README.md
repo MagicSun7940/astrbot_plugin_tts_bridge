@@ -10,6 +10,11 @@ AstrBot 插件：多语言文字 + 语音桥接
 
 ## 更新日志
 
+### v1.3.0
+- 修复 debug 模式日志无输出问题：日志级别由 INFO 改为 WARNING，确保不被 AstrBot 日志过滤器过滤
+- 修复语音中插入 "japan" 等英文语言标注的问题：翻译结果在发送给 TTS 前会自动过滤 `(Japanese)`、`[Japanese]`、`（日语）` 等语言标注内容
+- debug 输出新增"翻译后清洗文本"一项，方便对比过滤前后的差异
+
 ### v1.2.0
 - `/ttsb` 不带子命令时直接显示帮助界面（与 `/ttsb help` 效果相同）
 
@@ -33,8 +38,9 @@ AstrBot 插件：多语言文字 + 语音桥接
 1. 拦截 AI 的文字回复
 2. 按配置的正则过滤掉不需要朗读的内容（如括号内的动作描写）
 3. 调用翻译 API 将文本翻译为目标语言（可关闭，直接对原文 TTS）
-4. 调用 TTS API 合成语音
-5. 语音和原始文字一起发送给用户
+4. 自动清洗翻译结果中可能附带的语言标注（如 `(Japanese)`）
+5. 调用 TTS API 合成语音
+6. 语音和原始文字一起发送给用户
 
 ---
 
@@ -96,12 +102,13 @@ AstrBot/data/plugins/astrbot_plugin_tts_bridge/
 
 ### 调试模式（debug_mode）
 
-开启后，每次 TTS 处理时会在 AstrBot 日志中输出以下信息，方便排查翻译错误或语音合成异常：
+开启后，每次 TTS 处理时会在 AstrBot 日志中以 `[TTS_BRIDGE DEBUG]` 为前缀输出以下信息：
 
-- `[DEBUG] 原始文本`：AI 回复的原始文字
-- `[DEBUG] 过滤后文本`：经正则过滤后的文字（若有变化才输出）
-- `[DEBUG] 翻译后文本`：翻译 API 返回的结果
-- `[DEBUG] 发送给 TTS 的文本`：最终发送给语音合成的文字
+- `原始文本`：AI 回复的原始文字
+- `过滤后文本`：经正则过滤后的文字（若有变化才输出）
+- `翻译后原始返回`：翻译 API 返回的原始结果
+- `翻译后清洗文本`：去除语言标注后的翻译结果
+- `发送给 TTS 的文本`：最终发送给语音合成的文字
 
 日志可在 AstrBot 控制台或服务器日志文件中查看。
 
@@ -168,7 +175,6 @@ AstrBot/data/plugins/astrbot_plugin_tts_bridge/
 # 新增翻译供应商
 class MyTranslateProvider(TranslateProvider):
     async def translate(self, text: str) -> str:
-        # 实现翻译逻辑
         ...
 
 # 新增 TTS 供应商
