@@ -5,9 +5,19 @@
     "default": true
   },
   "filter_regex": {
-    "description": "发送给 TTS 前过滤文本的正则表达式。默认过滤中文括号及其中内容（动作描写）。留空则不过滤",
+    "description": "发送给 TTS 前过滤文本的正则表达式。多个规则用 | 连接，留空则不过滤。\n\n常用预设：\n过滤中文圆括号：[（(][^）)]*[）)]\n过滤英文括号：\\([^)]*\\)\n过滤【】内容：【[^】]*】\n过滤XML/HTML标签：<[^>]+>\n过滤Markdown符号：\\*{1,3}|_{1,3}\n\n全能组合版：\n[（(][^）)]*[）)]|\\([^)]*\\)|【[^】]*】|<[^>]+>|\\*{1,3}|_{1,3}",
     "type": "string",
     "default": "[（(][^）)]*[）)]"
+  },
+  "enable_emotion": {
+    "description": "是否启用情感识别。开启后会在翻译完成后自动分析文本情感，并在发给 TTS 的文本前加入情感标签（如 [emotion=shy]），使语音语气更符合语境。目前仅 MiniMax TTS 支持此功能",
+    "type": "bool",
+    "default": true
+  },
+  "emotion_model": {
+    "description": "情感识别使用的模型，复用翻译 API 的 Key 和 Base URL。推荐使用轻量快速的模型以减少延迟，如 Qwen/Qwen2.5-7B-Instruct",
+    "type": "string",
+    "default": "Qwen/Qwen2.5-7B-Instruct"
   },
   "translate_provider": {
     "description": "翻译供应商。目前支持：openai_compat（兼容 OpenAI 格式，适用于硅基流动、DeepSeek、OpenAI 等）",
@@ -15,7 +25,7 @@
     "default": "openai_compat"
   },
   "translate_api_key": {
-    "description": "翻译 API Key",
+    "description": "翻译 API Key（情感识别也使用此 Key）",
     "type": "string",
     "default": ""
   },
@@ -25,13 +35,13 @@
     "default": "https://api.siliconflow.cn/v1"
   },
   "translate_model": {
-    "description": "翻译使用的模型",
+    "description": "翻译使用的模型，推荐 deepseek-ai/DeepSeek-V3",
     "type": "string",
-    "default": "Qwen/Qwen2.5-7B-Instruct"
+    "default": "deepseek-ai/DeepSeek-V3"
   },
   "translate_prompt": {
     "description": "翻译系统提示词，可自定义翻译目标语言和风格",
-    "type": "text",
+    "type": "string",
     "default": "请将以下文本翻译成日语。只输出翻译结果，不要添加任何解释或其他内容。"
   },
   "tts_provider": {
@@ -60,7 +70,7 @@
     "default": "speech-2.8-turbo"
   },
   "debug_mode": {
-    "description": "调试模式。开启后将在日志中输出：原始文本、过滤后文本、翻译后文本、发送给 TTS 的文本，方便排查翻译或合成异常",
+    "description": "调试模式。开启后在日志中以 [TTS_BRIDGE DEBUG] 为前缀输出：原始文本、过滤后文本、翻译后原始返回、翻译后清洗文本、识别情感、发送给 TTS 的文本",
     "type": "bool",
     "default": false
   }

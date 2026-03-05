@@ -12,11 +12,14 @@ import astrbot.api.message_components as Comp
 
 logger = logging.getLogger("astrbot_plugin_tts_bridge")
 
-# 过滤翻译API可能附加的语言标注，如 (Japanese)、[Japanese]、（日语）等
+# 过滤翻译API可能附加的语言标注
 _LANG_TAG_PATTERN = re.compile(
-    r'[\(\[（【][\s]*(?:japanese|japanese translation|日语|日文|ja|jp)[\s]*[\)\]）】]',
+    r'[\(\[（【]\s*(?:japanese|japanese translation|日语|日文|ja|jp)\s*[\)\]）】]',
     re.IGNORECASE
 )
+
+# MiniMax 支持的情感列表
+MINIMAX_EMOTIONS = ["happy", "sad", "angry", "fearful", "disgusted", "surprised", "shy", "excited", "neutral"]
 
 
 # ─────────────────────────────────────────────
@@ -30,7 +33,6 @@ class TranslateProvider(ABC):
 
 
 class OpenAICompatTranslateProvider(TranslateProvider):
-    """兼容 OpenAI 格式的翻译供应商（硅基流动、OpenAI、DeepSeek 等）"""
     def __init__(self, api_key: str, base_url: str, model: str, prompt: str):
         self.api_key = api_key
         self.base_url = base_url.rstrip("/")
@@ -56,18 +58,52 @@ class OpenAICompatTranslateProvider(TranslateProvider):
 
 
 # ─────────────────────────────────────────────
+# 情感识别器
+# ─────────────────────────────────────────────
+
+class EmotionDetector:
+    def __init__(self, api_key: str, base_url: str, model: str):
+        self.api_key = api_key
+        self.base_url = base_url.rstrip("/")
+        self.model = model
+
+    async def detect(self, text: str) -> str:
+        """分析文本情感，返回 MiniMax 情感标签名"""
+        emotion_list = "、".join(MINIMAX_EMOTIONS)
+        system_prompt = (
+            f"你是一个情感分析助手。请分析以下日语文本的情感，从以下选项中选择最匹配的一个：{emotion_list}。\n"
+            "只输出情感标签的英文名称，不要输出任何其他内容。"
+        )
+        async with httpx.AsyncClient(timeout=20) as client:
+            resp = await client.post(
+                f"{self.base_url}/chat/completions",
+                headers={"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"},
+                json={
+                    "model": self.model,
+                    "messages": [
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": text}
+                    ],
+                    "max_tokens": 20
+                }
+            )
+            data = resp.json()
+            result = data["choices"][0]["message"]["content"].strip().lower()
+            # 确保返回值在合法列表内，否则降级为 neutral
+            return result if result in MINIMAX_EMOTIONS else "neutral"
+
+
+# ─────────────────────────────────────────────
 # TTS 供应商抽象接口
 # ─────────────────────────────────────────────
 
 class TTSProvider(ABC):
     @abstractmethod
     async def synthesize(self, text: str) -> str:
-        """合成语音，返回音频文件路径"""
         pass
 
 
 class MinimaxTTSProvider(TTSProvider):
-    """MiniMax TTS 供应商"""
     def __init__(self, api_key: str, group_id: str, voice_id: str, model: str):
         self.api_key = api_key
         self.group_id = group_id
@@ -128,6 +164,7 @@ class TtsBridgePlugin(Star):
         self.enabled_sessions = set()
         self.translate_provider: TranslateProvider = None
         self.tts_provider: TTSProvider = None
+        self.emotion_detector: EmotionDetector = None
         self._init_providers()
 
     def _init_providers(self):
@@ -136,7 +173,7 @@ class TtsBridgePlugin(Star):
             self.translate_provider = OpenAICompatTranslateProvider(
                 api_key=self.config.get("translate_api_key", ""),
                 base_url=self.config.get("translate_base_url", "https://api.siliconflow.cn/v1"),
-                model=self.config.get("translate_model", "Qwen/Qwen2.5-7B-Instruct"),
+                model=self.config.get("translate_model", "deepseek-ai/DeepSeek-V3"),
                 prompt=self.config.get("translate_prompt", "请将以下文本翻译成日语。只输出翻译结果，不要添加任何解释或其他内容。")
             )
 
@@ -149,14 +186,20 @@ class TtsBridgePlugin(Star):
                 model=self.config.get("minimax_model", "speech-2.8-turbo")
             )
 
+        # 情感识别器：复用翻译API的配置
+        if self.config.get("enable_emotion", True):
+            self.emotion_detector = EmotionDetector(
+                api_key=self.config.get("translate_api_key", ""),
+                base_url=self.config.get("translate_base_url", "https://api.siliconflow.cn/v1"),
+                model=self.config.get("emotion_model", "deepseek-ai/DeepSeek-V3")
+            )
+
     def _debug(self, msg: str):
-        """debug模式下输出日志，使用WARNING级别确保不被过滤"""
         if self.config.get("debug_mode", False):
             logger.warning(f"[TTS_BRIDGE DEBUG] {msg}")
 
     @filter.command_group("ttsb", alias=set(), desc="tts_bridge 插件")
     async def ttsb_group(self, event: AstrMessageEvent):
-        """不带子命令时直接显示帮助"""
         yield event.plain_result(HELP_TEXT)
 
     @ttsb_group.command("help", desc="查看所有指令及其作用")
@@ -188,7 +231,7 @@ class TtsBridgePlugin(Star):
 
         self._debug(f"原始文本: {text}")
 
-        # 按配置的正则过滤
+        # 正则过滤
         filter_regex = self.config.get("filter_regex", r'[（(][^）)]*[）)]')
         if filter_regex:
             try:
@@ -197,25 +240,30 @@ class TtsBridgePlugin(Star):
                     self._debug(f"过滤后文本: {filtered}")
                 text = filtered
             except re.error as e:
-                logger.warning(f"[TTS_BRIDGE] 过滤正则表达式有误: {e}，已跳过过滤")
+                logger.warning(f"[TTS_BRIDGE] 过滤正则有误: {e}，已跳过")
 
         if not text:
             return
 
         try:
+            # 翻译
             if self.config.get("enable_translate", True) and self.translate_provider:
                 translated = await self.translate_provider.translate(text)
                 self._debug(f"翻译后原始返回: {translated}")
-
-                # 过滤翻译API可能附加的语言标注
                 translated = _LANG_TAG_PATTERN.sub('', translated).strip()
                 self._debug(f"翻译后清洗文本: {translated}")
-
                 if not translated:
                     return
                 text = translated
 
-            self._debug(f"发送给 TTS 的文本: {text}")
+            # 情感识别
+            if self.config.get("enable_emotion", True) and self.emotion_detector:
+                emotion = await self.emotion_detector.detect(text)
+                self._debug(f"识别情感: {emotion}")
+                text = f"[emotion={emotion}]{text}"
+                self._debug(f"发送给 TTS 的文本: {text}")
+            else:
+                self._debug(f"发送给 TTS 的文本: {text}")
 
             if not self.tts_provider:
                 logger.warning("[TTS_BRIDGE] TTS 供应商未初始化，请检查配置")
