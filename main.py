@@ -62,18 +62,16 @@ class OpenAICompatTranslateProvider(TranslateProvider):
 # ─────────────────────────────────────────────
 
 class EmotionDetector:
-    def __init__(self, api_key: str, base_url: str, model: str):
+    def __init__(self, api_key: str, base_url: str, model: str, prompt_template: str):
         self.api_key = api_key
         self.base_url = base_url.rstrip("/")
         self.model = model
+        self.prompt_template = prompt_template
 
     async def detect(self, text: str) -> str:
         """分析文本情感，返回 MiniMax 情感标签名"""
         emotion_list = "、".join(MINIMAX_EMOTIONS)
-        system_prompt = (
-            f"你是一个情感分析助手。请分析以下日语文本的情感，从以下选项中选择最匹配的一个：{emotion_list}。\n"
-            "只输出情感标签的英文名称，不要输出任何其他内容。"
-        )
+        system_prompt = self.prompt_template.replace("{emotion_list}", emotion_list)
         async with httpx.AsyncClient(timeout=20) as client:
             resp = await client.post(
                 f"{self.base_url}/chat/completions",
@@ -156,7 +154,7 @@ HELP_TEXT = (
 # 插件主体
 # ─────────────────────────────────────────────
 
-@register("astrbot_plugin_tts_bridge", "magic-sun", "多语言文字+语音桥接插件，支持翻译后TTS合成", "1.3.1")
+@register("astrbot_plugin_tts_bridge", "magic-sun", "多语言文字+语音桥接插件，支持翻译后TTS合成", "1.3.2")
 class TtsBridgePlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig):
         super().__init__(context)
@@ -187,11 +185,17 @@ class TtsBridgePlugin(Star):
             )
 
         # 情感识别器：复用翻译API的配置
+        default_emotion_prompt = (
+            "你是一个情感分析助手。请分析以下日语文本的情感，从以下选项中选择最匹配的一个：{emotion_list}。\n\n"
+            "角色性格参考：该角色是傲娇萌妹，日常偏害羞和平静，只在明显情绪波动时才使用对应情感。\n\n"
+            "只输出情感标签的英文名称，不要输出任何其他内容。"
+        )
         if self.config.get("enable_emotion", True):
             self.emotion_detector = EmotionDetector(
                 api_key=self.config.get("translate_api_key", ""),
                 base_url=self.config.get("translate_base_url", "https://api.siliconflow.cn/v1"),
-                model=self.config.get("emotion_model", "deepseek-ai/DeepSeek-V3")
+                model=self.config.get("emotion_model", "Qwen/Qwen2.5-7B-Instruct"),
+                prompt_template=self.config.get("emotion_prompt", default_emotion_prompt)
             )
 
     def _debug(self, msg: str):

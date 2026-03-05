@@ -10,7 +10,7 @@
     "default": "[（(][^）)]*[）)]"
   },
   "enable_emotion": {
-    "description": "是否启用情感识别。开启后会在翻译完成后自动分析文本情感，并在发给 TTS 的文本前加入情感标签（如 [emotion=shy]），使语音语气更符合语境。目前仅 MiniMax TTS 支持此功能",
+    "description": "是否启用情感识别。开启后自动分析文本情感并在发给 TTS 的文本前加入情感标签（如 [emotion=shy]），使语音语气更符合语境。目前仅 MiniMax TTS 支持此功能",
     "type": "bool",
     "default": true
   },
@@ -18,6 +18,11 @@
     "description": "情感识别使用的模型，复用翻译 API 的 Key 和 Base URL。推荐使用轻量快速的模型以减少延迟，如 Qwen/Qwen2.5-7B-Instruct",
     "type": "string",
     "default": "Qwen/Qwen2.5-7B-Instruct"
+  },
+  "emotion_prompt": {
+    "description": "情感识别系统提示词。{emotion_list} 会被自动替换为支持的情感列表。\n可在此描述角色性格倾向，引导模型选择符合角色的情感。\n\n支持的情感：happy / sad / angry / fearful / disgusted / surprised / shy / excited / neutral",
+    "type": "string",
+    "default": "你是一个情感分析助手。请分析以下日语文本的情感，从以下选项中选择最匹配的一个：{emotion_list}。\n\n角色性格参考：该角色是傲娇萌妹，日常偏害羞和平静，只在明显情绪波动时才使用对应情感。\n\n只输出情感标签的英文名称，不要输出任何其他内容。"
   },
   "translate_provider": {
     "description": "翻译供应商。目前支持：openai_compat（兼容 OpenAI 格式，适用于硅基流动、DeepSeek、OpenAI 等）",
@@ -40,9 +45,9 @@
     "default": "deepseek-ai/DeepSeek-V3"
   },
   "translate_prompt": {
-    "description": "翻译系统提示词，可自定义翻译目标语言和风格",
+    "description": "翻译系统提示词，可自定义翻译目标语言和风格。\n支持多行，修改后保存即可生效。",
     "type": "string",
-    "default": "你是一个日系二次元萌妹，正在把中文台词翻译成你说话的日语风格。\n\n翻译要求：\n- 用第一人称「私」或「あたし」\n- 称呼哥哥为「お兄ちゃん」\n- 语气要撒娇、可爱、带点小傲娇\n- 句尾可以适当加「～」「の」「よ」「ね」「もん」等语气词\n- 只输出翻译后的日语文本，不要输出任何解释、标注、括号说明或其他多余内容\n- 绝对不要输出英文单词或语言标注"
+    "default": "你是一个日系二次元萌妹，正在把中文台词翻译成你说话的日语风格。\n\n翻译要求：\n- 用第一人称「私」或「あたし」\n- 称呼哥哥为「お兄ちゃん」\n- 语气要撒娇、可爱、带点小傲娇\n- 句尾可以适当加「～」「の」「よ」「ね」「もん」等语气词\n- 只输出翻译后的日语文本\n- 不要输出任何解释、标注、括号说明或多余内容\n- 绝对不要输出英文单词或语言标注"
   },
   "tts_provider": {
     "description": "TTS 供应商。目前支持：minimax",
