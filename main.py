@@ -12,19 +12,13 @@ import astrbot.api.message_components as Comp
 
 logger = logging.getLogger("astrbot_plugin_tts_bridge")
 
-# 过滤翻译API可能附加的语言标注
 _LANG_TAG_PATTERN = re.compile(
     r'[\(\[（【]\s*(?:japanese|japanese translation|日语|日文|ja|jp)\s*[\)\]）】]',
     re.IGNORECASE
 )
 
-# MiniMax 支持的情感列表
 MINIMAX_EMOTIONS = ["happy", "sad", "angry", "fearful", "disgusted", "surprised", "shy", "excited", "neutral"]
 
-
-# ─────────────────────────────────────────────
-# 翻译供应商抽象接口
-# ─────────────────────────────────────────────
 
 class TranslateProvider(ABC):
     @abstractmethod
@@ -57,10 +51,6 @@ class OpenAICompatTranslateProvider(TranslateProvider):
             return data["choices"][0]["message"]["content"].strip()
 
 
-# ─────────────────────────────────────────────
-# 情感识别器
-# ─────────────────────────────────────────────
-
 class EmotionDetector:
     def __init__(self, api_key: str, base_url: str, model: str, prompt_template: str):
         self.api_key = api_key
@@ -69,7 +59,6 @@ class EmotionDetector:
         self.prompt_template = prompt_template
 
     async def detect(self, text: str) -> str:
-        """分析文本情感，返回 MiniMax 情感标签名"""
         emotion_list = "、".join(MINIMAX_EMOTIONS)
         system_prompt = self.prompt_template.replace("{emotion_list}", emotion_list)
         async with httpx.AsyncClient(timeout=20) as client:
@@ -87,17 +76,12 @@ class EmotionDetector:
             )
             data = resp.json()
             result = data["choices"][0]["message"]["content"].strip().lower()
-            # 确保返回值在合法列表内，否则降级为 neutral
             return result if result in MINIMAX_EMOTIONS else "neutral"
 
 
-# ─────────────────────────────────────────────
-# TTS 供应商抽象接口
-# ─────────────────────────────────────────────
-
 class TTSProvider(ABC):
     @abstractmethod
-    async def synthesize(self, text: str) -> str:
+    async def synthesize(self, text: str, emotion: str = None) -> str:
         pass
 
 
@@ -108,7 +92,17 @@ class MinimaxTTSProvider(TTSProvider):
         self.voice_id = voice_id
         self.model = model
 
-    async def synthesize(self, text: str) -> str:
+    async def synthesize(self, text: str, emotion: str = None) -> str:
+        voice_setting = {
+            "voice_id": self.voice_id,
+            "speed": 1.0,
+            "vol": 1.0,
+            "pitch": 0
+        }
+        # emotion 作为 voice_setting 参数传入，而非拼入文本
+        if emotion and emotion in MINIMAX_EMOTIONS:
+            voice_setting["emotion"] = emotion
+
         async with httpx.AsyncClient(timeout=60) as client:
             resp = await client.post(
                 f"https://api.minimax.chat/v1/t2a_v2?GroupId={self.group_id}",
@@ -116,7 +110,7 @@ class MinimaxTTSProvider(TTSProvider):
                 json={
                     "model": self.model,
                     "text": text,
-                    "voice_setting": {"voice_id": self.voice_id, "speed": 1.0, "vol": 1.0, "pitch": 0},
+                    "voice_setting": voice_setting,
                     "audio_setting": {"format": "mp3", "sample_rate": 32000}
                 }
             )
@@ -133,10 +127,6 @@ class MinimaxTTSProvider(TTSProvider):
             return path
 
 
-# ─────────────────────────────────────────────
-# 帮助文本
-# ─────────────────────────────────────────────
-
 HELP_TEXT = (
     "📖 tts_bridge 插件指令列表\n"
     "─────────────────\n"
@@ -149,12 +139,14 @@ HELP_TEXT = (
     "实现文字与语音使用不同语言的效果。"
 )
 
+DEFAULT_EMOTION_PROMPT = (
+    "你是一个情感分析助手。请分析以下日语文本的情感，从以下选项中选择最匹配的一个：{emotion_list}。\n\n"
+    "角色性格参考：该角色是傲娇萌妹，日常偏害羞和平静，只在明显情绪波动时才使用对应情感。\n\n"
+    "只输出情感标签的英文名称，不要输出任何其他内容。"
+)
 
-# ─────────────────────────────────────────────
-# 插件主体
-# ─────────────────────────────────────────────
 
-@register("astrbot_plugin_tts_bridge", "magic-sun", "多语言文字+语音桥接插件，支持翻译后TTS合成", "1.3.2")
+@register("astrbot_plugin_tts_bridge", "magic-sun", "多语言文字+语音桥接插件，支持翻译后TTS合成", "1.3.4")
 class TtsBridgePlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig):
         super().__init__(context)
@@ -184,18 +176,12 @@ class TtsBridgePlugin(Star):
                 model=self.config.get("minimax_model", "speech-2.8-turbo")
             )
 
-        # 情感识别器：复用翻译API的配置
-        default_emotion_prompt = (
-            "你是一个情感分析助手。请分析以下日语文本的情感，从以下选项中选择最匹配的一个：{emotion_list}。\n\n"
-            "角色性格参考：该角色是傲娇萌妹，日常偏害羞和平静，只在明显情绪波动时才使用对应情感。\n\n"
-            "只输出情感标签的英文名称，不要输出任何其他内容。"
-        )
         if self.config.get("enable_emotion", True):
             self.emotion_detector = EmotionDetector(
                 api_key=self.config.get("translate_api_key", ""),
                 base_url=self.config.get("translate_base_url", "https://api.siliconflow.cn/v1"),
                 model=self.config.get("emotion_model", "Qwen/Qwen2.5-7B-Instruct"),
-                prompt_template=self.config.get("emotion_prompt", default_emotion_prompt)
+                prompt_template=self.config.get("emotion_prompt", DEFAULT_EMOTION_PROMPT)
             )
 
     def _debug(self, msg: str):
@@ -235,7 +221,6 @@ class TtsBridgePlugin(Star):
 
         self._debug(f"原始文本: {text}")
 
-        # 正则过滤
         filter_regex = self.config.get("filter_regex", r'[（(][^）)]*[）)]')
         if filter_regex:
             try:
@@ -250,7 +235,6 @@ class TtsBridgePlugin(Star):
             return
 
         try:
-            # 翻译
             if self.config.get("enable_translate", True) and self.translate_provider:
                 translated = await self.translate_provider.translate(text)
                 self._debug(f"翻译后原始返回: {translated}")
@@ -260,19 +244,18 @@ class TtsBridgePlugin(Star):
                     return
                 text = translated
 
-            # 情感识别
+            # 情感识别：结果作为 API 参数传入，不拼入文本
+            emotion = None
             if self.config.get("enable_emotion", True) and self.emotion_detector:
                 emotion = await self.emotion_detector.detect(text)
                 self._debug(f"识别情感: {emotion}")
-                text = f"[emotion={emotion}]{text}"
-                self._debug(f"发送给 TTS 的文本: {text}")
-            else:
-                self._debug(f"发送给 TTS 的文本: {text}")
+
+            self._debug(f"发送给 TTS 的文本: {text}，情感参数: {emotion}")
 
             if not self.tts_provider:
                 logger.warning("[TTS_BRIDGE] TTS 供应商未初始化，请检查配置")
                 return
-            audio_path = await self.tts_provider.synthesize(text)
+            audio_path = await self.tts_provider.synthesize(text, emotion=emotion)
             if not audio_path:
                 return
 
