@@ -1,11 +1,12 @@
 import re
 import os
+import json
 import uuid
 import tempfile
 import httpx
 from abc import ABC, abstractmethod
 
-from astrbot.api.star import Star, register, Context
+from astrbot.api.star import Star, register, Context, StarTools
 from astrbot.api import AstrBotConfig, logger
 from astrbot.api.event import filter, AstrMessageEvent
 import astrbot.api.message_components as Comp
@@ -151,7 +152,7 @@ class OpenAITTSProvider(TTSProvider):
 
 
 def _save_audio(data: bytes, fmt: str) -> str:
-    """使用系统临时目录保存音频，避免硬编码路径"""
+    """保存音频到系统临时目录，发送后自动清理"""
     temp_dir = tempfile.gettempdir()
     path = os.path.join(temp_dir, f"tts_bridge_{uuid.uuid4().hex}.{fmt}")
     with open(path, "wb") as f:
@@ -186,7 +187,7 @@ DEFAULT_EMOTION_PROMPT = (
 # 插件主体
 # ─────────────────────────────────────────────
 
-@register("astrbot_plugin_tts_bridge", "MagicSun7940", "多语言文字+语音桥接插件，支持翻译后TTS合成", "1.4.1")
+@register("astrbot_plugin_tts_bridge", "MagicSun7940", "多语言文字+语音桥接插件，支持翻译后TTS合成", "1.4.2")
 class TtsBridgePlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig):
         super().__init__(context)
@@ -199,13 +200,13 @@ class TtsBridgePlugin(Star):
         self._init_providers()
 
     def _get_sessions_path(self) -> str:
-        data_dir = os.path.join(os.path.dirname(__file__), "data")
-        os.makedirs(data_dir, exist_ok=True)
-        return os.path.join(data_dir, "sessions.json")
+        """使用框架规范的数据目录"""
+        data_dir = StarTools.get_data_dir()
+        data_dir.mkdir(parents=True, exist_ok=True)
+        return str(data_dir / "tts_bridge_sessions.json")
 
     def _load_sessions(self):
         """从本地文件加载已开启的会话，重启后状态不丢失"""
-        import json
         path = self._get_sessions_path()
         try:
             if os.path.exists(path):
@@ -217,7 +218,6 @@ class TtsBridgePlugin(Star):
 
     def _save_sessions(self):
         """持久化会话状态到本地文件"""
-        import json
         path = self._get_sessions_path()
         try:
             with open(path, "w") as f:
@@ -251,6 +251,7 @@ class TtsBridgePlugin(Star):
                 voice=self.config.get("openai_tts_voice", "alloy")
             )
 
+        # 情感识别复用翻译 API 的 Key 和 Base URL，仅 MiniMax 支持
         if tp2 == "minimax" and self.config.get("enable_emotion", True):
             self.emotion_detector = EmotionDetector(
                 api_key=self.config.get("translate_api_key", ""),
@@ -304,6 +305,7 @@ class TtsBridgePlugin(Star):
         if not text:
             return
 
+        audio_path = None
         try:
             if self.config.get("enable_translate", True) and self.translate_provider:
                 translated = await self.translate_provider.translate(text)
@@ -318,6 +320,7 @@ class TtsBridgePlugin(Star):
 
             if not self.tts_provider:
                 return
+
             audio_path = await self.tts_provider.synthesize(text, emotion=emotion)
             if not audio_path:
                 return
@@ -326,3 +329,10 @@ class TtsBridgePlugin(Star):
 
         except Exception as e:
             logger.error(f"[TTS_BRIDGE] 失败: {e}")
+        finally:
+            # 发送完毕后清理临时音频文件，避免磁盘积累
+            if audio_path and os.path.exists(audio_path):
+                try:
+                    os.remove(audio_path)
+                except Exception:
+                    pass
