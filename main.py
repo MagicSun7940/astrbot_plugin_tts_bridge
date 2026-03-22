@@ -2,6 +2,7 @@ import re
 import os
 import json
 import uuid
+import asyncio
 import tempfile
 import httpx
 from abc import ABC, abstractmethod
@@ -18,6 +19,9 @@ _LANG_TAG_PATTERN = re.compile(
     re.IGNORECASE
 )
 
+# 音频最大体积限制：10MB
+MAX_AUDIO_BYTES = 10 * 1024 * 1024
+
 
 # ─────────────────────────────────────────────
 # 翻译供应商
@@ -26,6 +30,9 @@ _LANG_TAG_PATTERN = re.compile(
 class TranslateProvider(ABC):
     @abstractmethod
     async def translate(self, text: str) -> str:
+        pass
+
+    async def close(self):
         pass
 
 
@@ -52,7 +59,10 @@ class OpenAICompatTranslateProvider(TranslateProvider):
         )
         resp.raise_for_status()
         data = resp.json()
-        return data["choices"][0]["message"]["content"].strip()
+        content = data.get("choices", [{}])[0].get("message", {}).get("content")
+        if not content:
+            raise ValueError("翻译 API 返回结构异常，未找到 content 字段")
+        return content.strip()
 
     async def close(self):
         await self.client.aclose()
@@ -87,7 +97,8 @@ class EmotionDetector:
         )
         resp.raise_for_status()
         data = resp.json()
-        result = data["choices"][0]["message"]["content"].strip().lower()
+        result = data.get("choices", [{}])[0].get("message", {}).get("content", "")
+        result = result.strip().lower()
         return result if result in MINIMAX_EMOTIONS else "neutral"
 
     async def close(self):
@@ -135,7 +146,14 @@ class MinimaxTTSProvider(TTSProvider):
         base_resp = result.get("base_resp", {})
         if base_resp.get("status_code") != 0:
             raise Exception(f"MiniMax TTS 错误: {base_resp.get('status_msg')}")
-        audio_bytes = bytes.fromhex(result["data"]["audio"])
+
+        audio_hex = result.get("data", {}).get("audio")
+        if not audio_hex or not isinstance(audio_hex, str):
+            raise ValueError("MiniMax 返回结构异常，未找到 audio 字段")
+        if len(audio_hex) > MAX_AUDIO_BYTES * 2:
+            raise ValueError(f"音频数据超过最大限制 {MAX_AUDIO_BYTES} 字节")
+
+        audio_bytes = bytes.fromhex(audio_hex)
         return _save_audio(audio_bytes, "mp3")
 
     async def close(self):
@@ -162,6 +180,8 @@ class OpenAITTSProvider(TTSProvider):
             }
         )
         resp.raise_for_status()
+        if len(resp.content) > MAX_AUDIO_BYTES:
+            raise ValueError(f"音频数据超过最大限制 {MAX_AUDIO_BYTES} 字节")
         return _save_audio(resp.content, "mp3")
 
     async def close(self):
@@ -169,7 +189,6 @@ class OpenAITTSProvider(TTSProvider):
 
 
 def _save_audio(data: bytes, fmt: str) -> str:
-    """保存音频到系统临时目录，依赖操作系统的临时文件清理机制"""
     temp_dir = tempfile.gettempdir()
     path = os.path.join(temp_dir, f"tts_bridge_{uuid.uuid4().hex}.{fmt}")
     with open(path, "wb") as f:
@@ -199,17 +218,21 @@ DEFAULT_EMOTION_PROMPT = (
     "只输出情感标签的英文名称，不要输出任何其他内容。"
 )
 
+# 正则最大长度限制，防止 ReDoS
+MAX_REGEX_LEN = 500
+
 
 # ─────────────────────────────────────────────
 # 插件主体
 # ─────────────────────────────────────────────
 
-@register("astrbot_plugin_tts_bridge", "MagicSun7940", "多语言文字+语音桥接插件，支持翻译后TTS合成", "1.4.3")
+@register("astrbot_plugin_tts_bridge", "MagicSun7940", "多语言文字+语音桥接插件，支持翻译后TTS合成", "1.4.4")
 class TtsBridgePlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig):
         super().__init__(context)
         self.config = config
         self.enabled_sessions = set()
+        self._sessions_lock = asyncio.Lock()
         self.translate_provider: TranslateProvider = None
         self.tts_provider: TTSProvider = None
         self.emotion_detector: EmotionDetector = None
@@ -231,13 +254,24 @@ class TtsBridgePlugin(Star):
             logger.warning(f"[TTS_BRIDGE] 加载会话状态失败: {e}")
             self.enabled_sessions = set()
 
-    def _save_sessions(self):
-        path = self._get_sessions_path()
-        try:
-            with open(path, "w") as f:
-                json.dump(list(self.enabled_sessions), f)
-        except Exception as e:
-            logger.warning(f"[TTS_BRIDGE] 保存会话状态失败: {e}")
+    async def _save_sessions(self):
+        """使用 asyncio.Lock 保护并发写入"""
+        async with self._sessions_lock:
+            path = self._get_sessions_path()
+            try:
+                with open(path, "w") as f:
+                    json.dump(list(self.enabled_sessions), f)
+            except Exception as e:
+                logger.warning(f"[TTS_BRIDGE] 保存会话状态失败: {e}")
+
+    async def _close_providers(self):
+        """逐个关闭 provider，单个失败不影响其他"""
+        for provider in [self.translate_provider, self.tts_provider, self.emotion_detector]:
+            if provider:
+                try:
+                    await provider.close()
+                except Exception as e:
+                    logger.warning(f"[TTS_BRIDGE] 关闭 provider 失败: {e}")
 
     def _init_providers(self):
         tp = self.config.get("translate_provider", "openai_compat")
@@ -265,7 +299,6 @@ class TtsBridgePlugin(Star):
                 voice=self.config.get("openai_tts_voice", "alloy")
             )
 
-        # 情感识别复用翻译 API 的 Key 和 Base URL，仅 MiniMax 支持
         if tp2 == "minimax" and self.config.get("enable_emotion", True):
             self.emotion_detector = EmotionDetector(
                 api_key=self.config.get("translate_api_key", ""),
@@ -277,13 +310,7 @@ class TtsBridgePlugin(Star):
             self.emotion_detector = None
 
     async def terminate(self):
-        """插件卸载时关闭所有 HTTP 客户端"""
-        if self.translate_provider:
-            await self.translate_provider.close()
-        if self.tts_provider:
-            await self.tts_provider.close()
-        if self.emotion_detector:
-            await self.emotion_detector.close()
+        await self._close_providers()
 
     @filter.command_group("ttsb", alias=set(), desc="tts_bridge 插件")
     async def ttsb_group(self, event: AstrMessageEvent):
@@ -295,15 +322,35 @@ class TtsBridgePlugin(Star):
 
     @ttsb_group.command("on", desc="开启当前会话的语音桥接")
     async def enable_tts(self, event: AstrMessageEvent):
+        # 开启前校验必要配置
+        tp2 = self.config.get("tts_provider", "minimax")
+        if tp2 == "minimax":
+            if not self.config.get("minimax_api_key") or not self.config.get("minimax_group_id") or not self.config.get("minimax_voice_id"):
+                yield event.plain_result("❌ MiniMax 配置不完整，请检查 minimax_api_key、minimax_group_id、minimax_voice_id")
+                return
+        elif tp2 == "openai_tts":
+            if not self.config.get("openai_tts_api_key"):
+                yield event.plain_result("❌ OpenAI TTS 配置不完整，请检查 openai_tts_api_key")
+                return
+
+        if self.config.get("enable_translate") and not self.config.get("translate_api_key"):
+            yield event.plain_result("❌ 翻译功能已启用但未配置 translate_api_key")
+            return
+
+        # 关闭旧 provider 再重建，避免客户端泄漏
+        await self._close_providers()
         self._init_providers()
-        self.enabled_sessions.add(event.unified_msg_origin)
-        self._save_sessions()
+
+        async with self._sessions_lock:
+            self.enabled_sessions.add(event.unified_msg_origin)
+        await self._save_sessions()
         yield event.plain_result("✅ 语音桥接已开启。发送 /ttsb off 可关闭。")
 
     @ttsb_group.command("off", desc="关闭当前会话的语音桥接")
     async def disable_tts(self, event: AstrMessageEvent):
-        self.enabled_sessions.discard(event.unified_msg_origin)
-        self._save_sessions()
+        async with self._sessions_lock:
+            self.enabled_sessions.discard(event.unified_msg_origin)
+        await self._save_sessions()
         yield event.plain_result("🔇 语音桥接已关闭。")
 
     @filter.on_llm_response()
@@ -320,10 +367,13 @@ class TtsBridgePlugin(Star):
 
         filter_regex = self.config.get("filter_regex", r'[（(][^）)]*[）)]')
         if filter_regex:
-            try:
-                text = re.sub(filter_regex, '', text).strip()
-            except re.error:
-                pass
+            if len(filter_regex) > MAX_REGEX_LEN:
+                logger.warning(f"[TTS_BRIDGE] filter_regex 超过最大长度 {MAX_REGEX_LEN}，已跳过过滤")
+            else:
+                try:
+                    text = re.sub(filter_regex, '', text).strip()
+                except re.error as e:
+                    logger.warning(f"[TTS_BRIDGE] 过滤正则有误: {e}，已跳过")
 
         if not text:
             return
@@ -338,7 +388,11 @@ class TtsBridgePlugin(Star):
 
             emotion = None
             if self.emotion_detector:
-                emotion = await self.emotion_detector.detect(text)
+                try:
+                    emotion = await self.emotion_detector.detect(text)
+                except Exception as e:
+                    logger.warning(f"[TTS_BRIDGE] 情感识别失败，降级为 neutral: {e}")
+                    emotion = "neutral"
 
             if not self.tts_provider:
                 return
