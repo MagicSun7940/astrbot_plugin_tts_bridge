@@ -2,7 +2,7 @@
 
 AstrBot 插件：多语言文字 + 语音桥接
 
-将 AI 的文字回复翻译为目标语言后进行 TTS 语音合成，实现**文字和语音使用不同语言**的效果。支持自动情感识别，使语音语气更贴合语境。
+将 AI 的文字回复翻译为目标语言后进行 TTS 语音合成，实现**文字和语音使用不同语言**的效果。
 
 **典型使用场景：** AI 用中文回复，同时附带带情感的日语语音（适合日语角色扮演）。
 
@@ -10,48 +10,56 @@ AstrBot 插件：多语言文字 + 语音桥接
 
 ## 更新日志
 
+### v1.4.0
+- 新增 OpenAI TTS 供应商，支持 `gpt-4o-mini-tts`、`tts-1`、`tts-1-hd` 等模型，兼容所有 OpenAI 格式的 TTS 接口
+- 移除 debug 模式配置项，精简插件配置页面
+- 配置项描述精简，移除多余的推荐说明文字
+- 情感识别现在仅在 `tts_provider` 为 `minimax` 时生效，切换到其他供应商时自动禁用
+
+### v1.3.5
+- 修复 debug 日志无法输出的问题（已在 v1.4.0 随 debug 模式一起移除）
+
+### v1.3.4
+- 修复情感标签被朗读出来的根本问题：情感由文本内嵌 `[emotion=xxx]` 改为通过 MiniMax API 的 `voice_setting.emotion` 参数传入
+
+### v1.3.3
+- 配置项描述精简，左侧标签文字不再截断
+- `filter_regex`、`emotion_prompt`、`translate_prompt` 改为大文本框显示
+
 ### v1.3.2
-- 新增 `emotion_prompt` 配置项，可自定义情感识别提示词，支持描述角色性格倾向引导情感选择
-- `{emotion_list}` 占位符会自动替换为支持的情感列表
-- `translate_prompt` 输入框现在显示为多行大文本框，方便编辑长提示词
+- 新增 `emotion_prompt` 配置项，可自定义情感识别提示词及角色性格倾向
+- `{emotion_list}` 占位符自动替换为支持的情感列表
+- `translate_prompt` 输入框改为多行大文本框
 
 ### v1.3.1
-- `translate_prompt` 默认值改为多行萌妹风格提示词，配置页输入框自动显示为大文本框，方便编辑
-- 翻译提示词默认风格：日系二次元萌妹对哥哥撒娇，以「お兄ちゃん」称呼哥哥
+- `translate_prompt` 默认值改为多行萌妹风格提示词
 
 ### v1.3.0
-- 新增自动情感识别功能：翻译完成后自动分析文本情感，在发给 TTS 的文本前插入 `[emotion=xxx]` 标签，使语音语气更符合语境（害羞时害羞、开心时开心）
-- 支持的情感：`happy`、`sad`、`angry`、`fearful`、`disgusted`、`surprised`、`shy`、`excited`、`neutral`
-- 情感识别复用翻译 API 的 Key 和 Base URL，可单独配置使用的模型（推荐轻量模型减少延迟）
-- 新增 `filter_regex` 常用预设规则说明（英文括号、【】、标签、Markdown 符号）
-- 修复语音中插入语言标注的问题，翻译结果发送前自动清洗
-- 修复 debug 模式日志无输出问题，debug 输出新增情感识别结果一项
+- 新增自动情感识别，翻译完成后自动分析情感并通过 API 参数控制语音语气
+- 新增语言标注自动清洗，过滤翻译结果中的 `(Japanese)` 等标注
+- 新增 `filter_regex` 常用预设规则（英文括号、方括号、标签、Markdown 符号）
 - 翻译模型默认值改为 `deepseek-ai/DeepSeek-V3`
 
 ### v1.2.0
-- `/ttsb` 不带子命令时直接显示帮助界面（与 `/ttsb help` 效果相同）
+- `/ttsb` 不带子命令时直接显示帮助界面
 
 ### v1.1.0
-- 指令重构：改为 `/ttsb on`、`/ttsb off`、`/ttsb help`
-- 新增指令组，在 AstrBot 行为管理中统一归属 `tts_bridge` 文件夹显示
-- 新增 `debug_mode` 调试模式配置项
+- 指令重构为 `/ttsb on`、`/ttsb off`、`/ttsb help`
+- 新增指令组，在 AstrBot 行为管理中统一归属 `tts_bridge` 文件夹
 - 新增 `filter_regex` 过滤规则配置项
 
 ### v1.0.0
-- 初始版本
-- 翻译供应商：OpenAI 兼容格式（硅基流动、DeepSeek、OpenAI 等）
-- TTS 供应商：MiniMax
-- 策略模式设计，支持多供应商扩展
+- 初始版本，支持 MiniMax TTS + OpenAI 兼容翻译
 
 ---
 
 ## 工作原理
 
 1. 拦截 AI 的文字回复
-2. 按配置的正则过滤不需要朗读的内容（如括号内的动作描写）
+2. 按配置的正则过滤不需要朗读的内容
 3. 调用翻译 API 将文本翻译为目标语言（可关闭）
 4. 自动清洗翻译结果中可能附带的语言标注
-5. 调用情感识别 API 分析文本情感，插入 `[emotion=xxx]` 标签（可关闭）
+5. 调用情感识别分析文本情感（仅 MiniMax 支持）
 6. 调用 TTS API 合成语音
 7. 语音和原始文字一起发送给用户
 
@@ -66,125 +74,62 @@ AstrBot 插件：多语言文字 + 语音桥接
 **方式二：手动安装**
 
 将插件文件夹放入 AstrBot 插件目录：
-
 ```
 AstrBot/data/plugins/astrbot_plugin_tts_bridge/
 ```
-
-重启或在控制台重载插件。
-
----
-
-## 前置准备
-
-### TTS 供应商：MiniMax
-
-- 注册地址：[minimaxi.com](https://minimaxi.com)
-- 获取 **API Key** 和 **Group ID**（账户管理 → 基本信息）
-- 如需克隆自定义音色，参考 MiniMax 声音克隆文档
-
-### 翻译 + 情感识别供应商：硅基流动（免费，推荐）
-
-- 注册地址：[siliconflow.cn](https://siliconflow.cn)
-- 注册后创建 API Key，新用户有免费额度
-- 翻译推荐模型：`deepseek-ai/DeepSeek-V3`
-- 情感识别推荐模型：`Qwen/Qwen2.5-7B-Instruct`（轻量快速）
 
 ---
 
 ## 配置项说明
 
-### 通用配置
+### 通用
 
 | 配置项 | 说明 | 默认值 |
 |--------|------|--------|
-| `enable_translate` | 是否启用翻译。关闭后直接对原文 TTS | `true` |
-| `filter_regex` | 过滤正则表达式，见下方说明 | 过滤中文圆括号内容 |
-| `debug_mode` | 调试模式，见下方说明 | `false` |
+| `enable_translate` | 启用翻译 | `true` |
+| `filter_regex` | TTS 前过滤正则，多规则用 `\|` 连接 | 过滤括号/标签/Markdown |
 
-### filter_regex 过滤规则
-
-多个规则用 `|` 连接组合使用。
-
-| 过滤目标 | 正则表达式 |
-|----------|-----------|
-| 中文圆括号内容（默认） | `[（(][^）)]*[）)]` |
-| 英文括号内容 | `\([^)]*\)` |
-| 方括号内容 | `【[^】]*】` |
-| XML/HTML 标签 | `<[^>]+>` |
-| Markdown 粗体/斜体符号 | `\*{1,3}\|_{1,3}` |
-
-全能组合版：
-```
-[（(][^）)]*[）)]|\([^)]*\)|【[^】]*】|<[^>]+>|\*{1,3}|_{1,3}
-```
-
-### 情感识别配置
+### 情感识别（仅 MiniMax）
 
 | 配置项 | 说明 | 默认值 |
 |--------|------|--------|
-| `enable_emotion` | 是否启用情感识别 | `true` |
-| `emotion_model` | 情感识别模型，复用翻译 API 的 Key 和 Base URL | `Qwen/Qwen2.5-7B-Instruct` |
+| `enable_emotion` | 启用情感识别 | `true` |
+| `emotion_model` | 情感识别模型 | `Qwen/Qwen2.5-7B-Instruct` |
+| `emotion_prompt` | 情感识别提示词，`{emotion_list}` 自动替换 | 傲娇萌妹性格描述 |
 
-支持的情感标签：
-
-| 标签 | 含义 |
-|------|------|
-| `happy` | 开心 |
-| `sad` | 悲伤 |
-| `angry` | 生气 |
-| `fearful` | 害怕 |
-| `disgusted` | 厌恶 |
-| `surprised` | 惊讶 |
-| `shy` | 害羞 |
-| `excited` | 兴奋 |
-| `neutral` | 平静（默认降级） |
-
-### 调试模式（debug_mode）
-
-开启后以 `[TTS_BRIDGE DEBUG]` 为前缀输出：
-
-| 输出项 | 说明 |
-|--------|------|
-| `原始文本` | AI 回复的原始文字 |
-| `过滤后文本` | 经正则过滤后的文字（有变化才输出） |
-| `翻译后原始返回` | 翻译 API 返回的原始结果 |
-| `翻译后清洗文本` | 去除语言标注后的结果 |
-| `识别情感` | 情感识别结果 |
-| `发送给 TTS 的文本` | 最终发送给语音合成的文字（含情感标签） |
+支持的情感：`happy` / `sad` / `angry` / `fearful` / `disgusted` / `surprised` / `shy` / `excited` / `neutral`
 
 ### 翻译配置
 
 | 配置项 | 说明 | 默认值 |
 |--------|------|--------|
-| `translate_provider` | 翻译供应商，目前支持 `openai_compat` | `openai_compat` |
-| `translate_api_key` | 翻译 API Key（情感识别也使用此 Key） | 空 |
-| `translate_base_url` | 翻译 API 地址 | `https://api.siliconflow.cn/v1` |
+| `translate_provider` | 供应商，支持 `openai_compat` | `openai_compat` |
+| `translate_api_key` | API Key（情感识别同用） | 空 |
+| `translate_base_url` | Base URL | `https://api.siliconflow.cn/v1` |
 | `translate_model` | 翻译模型 | `deepseek-ai/DeepSeek-V3` |
-| `translate_prompt` | 翻译系统提示词 | 翻译成日语 |
+| `translate_prompt` | 翻译提示词 | 日系萌妹风格 |
 
-**推荐提示词（日系萌妹对哥哥撒娇风格）：**
-```
-你是一个日系二次元萌妹，正在把中文台词翻译成你说话的日语风格。
+### TTS 配置
 
-翻译要求：
-- 用第一人称「私」或「あたし」
-- 称呼哥哥为「お兄ちゃん」
-- 语气要撒娇、可爱、带点小傲娇
-- 句尾可以适当加「～」「の」「よ」「ね」「もん」等语气词
-- 只输出翻译后的日语文本，不要输出任何解释、标注、括号说明或其他多余内容
-- 绝对不要输出英文单词或语言标注
-```
+`tts_provider` 填 `minimax` 或 `openai_tts`。
 
-### TTS 配置（MiniMax）
+**MiniMax：**
 
 | 配置项 | 说明 | 默认值 |
 |--------|------|--------|
-| `tts_provider` | TTS 供应商，目前支持 `minimax` | `minimax` |
-| `minimax_api_key` | MiniMax API Key | 空 |
-| `minimax_group_id` | MiniMax Group ID | 空 |
+| `minimax_api_key` | API Key | 空 |
+| `minimax_group_id` | Group ID | 空 |
 | `minimax_voice_id` | 音色 ID | 空 |
-| `minimax_model` | TTS 模型 | `speech-2.8-turbo` |
+| `minimax_model` | 模型 | `speech-2.8-turbo` |
+
+**OpenAI TTS：**
+
+| 配置项 | 说明 | 默认值 |
+|--------|------|--------|
+| `openai_tts_api_key` | API Key | 空 |
+| `openai_tts_base_url` | Base URL | `https://api.openai.com/v1` |
+| `openai_tts_model` | 模型（tts-1 / tts-1-hd / gpt-4o-mini-tts） | `gpt-4o-mini-tts` |
+| `openai_tts_voice` | 音色（alloy / echo / fable / onyx / nova / shimmer） | `alloy` |
 
 ---
 
@@ -192,30 +137,18 @@ AstrBot/data/plugins/astrbot_plugin_tts_bridge/
 
 | 指令 | 说明 |
 |------|------|
-| `/ttsb` | 查看帮助信息 |
-| `/ttsb help` | 查看帮助信息 |
-| `/ttsb on` | 开启当前会话的语音桥接 |
-| `/ttsb off` | 关闭当前会话的语音桥接 |
-
----
-
-## 注意事项
-
-- 使用前请关闭 AstrBot 原生的 TTS 功能，避免冲突
-- 情感识别会额外消耗一次 API 调用，推荐使用轻量模型（7B）以减少延迟
-- MiniMax 按字符收费（2元/万字符）
+| `/ttsb` 或 `/ttsb help` | 查看帮助 |
+| `/ttsb on` | 开启语音桥接 |
+| `/ttsb off` | 关闭语音桥接 |
 
 ---
 
 ## 扩展开发
 
 ```python
-class MyTranslateProvider(TranslateProvider):
-    async def translate(self, text: str) -> str:
-        ...
-
 class MyTTSProvider(TTSProvider):
-    async def synthesize(self, text: str) -> str:
+    async def synthesize(self, text: str, emotion: str = None) -> str:
+        # 实现合成逻辑，返回音频文件路径
         ...
 ```
 

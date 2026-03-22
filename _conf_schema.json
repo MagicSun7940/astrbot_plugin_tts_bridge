@@ -5,17 +5,17 @@
     "default": true
   },
   "filter_regex": {
-    "description": "TTS 前过滤正则。多规则用 | 连接，留空不过滤。\n\n常用预设：\n中文圆括号：[（(][^）)]*[）)]\n英文括号：\\([^)]*\\)\n方括号：【[^】]*】\nHTML/emotion标签：<[^>]+>|\\[emotion=[^\\]]*\\]\nMarkdown符号：\\*{1,3}|_{1,3}\n动作描写*文字*：\\*[^*]*\\*\n行首#标题：(?m)^#+\\s.*$\n数字编号：(?m)^\\d+[.、]\\s*\n\n全能组合（推荐）：\n[（(][^）)]*[）)]|\\([^)]*\\)|【[^】]*】|<[^>]+>|\\[emotion=[^\\]]*\\]|\\*[^*]+\\*|\\*{1,3}|_{1,3}",
+    "description": "TTS 前过滤正则。多规则用 | 连接，留空不过滤。\n\n预设：\n中文圆括号：[（(][^）)]*[）)]\n英文括号：\\([^)]*\\)\n方括号：【[^】]*】\nHTML标签：<[^>]+>\nMarkdown符号：\\*{1,3}|_{1,3}\n动作描写：\\*[^*]+\\*\n\n全能组合：\n[（(][^）)]*[）)]|\\([^)]*\\)|【[^】]*】|<[^>]+>|\\*[^*]+\\*|\\*{1,3}|_{1,3}",
     "type": "text",
-    "default": "[（(][^）)]*[）)]|\\([^)]*\\)|【[^】]*】|<[^>]+>|\\[emotion=[^\\]]*\\]|\\*[^*]+\\*|\\*{1,3}|_{1,3}"
+    "default": "[（(][^）)]*[）)]|\\([^)]*\\)|【[^】]*】|<[^>]+>|\\*[^*]+\\*|\\*{1,3}|_{1,3}"
   },
   "enable_emotion": {
-    "description": "启用情感识别。自动分析情感并在 TTS 文本前插入 [emotion=xxx] 标签，仅 MiniMax 支持",
+    "description": "启用情感识别（仅 MiniMax TTS 支持）。自动分析情感并通过 API 参数控制语音语气",
     "type": "bool",
     "default": true
   },
   "emotion_model": {
-    "description": "情感识别模型（复用翻译 API Key 和 Base URL）\n推荐轻量模型减少延迟，如 Qwen/Qwen2.5-7B-Instruct",
+    "description": "情感识别模型（复用翻译 API Key 和 Base URL）",
     "type": "string",
     "default": "Qwen/Qwen2.5-7B-Instruct"
   },
@@ -25,7 +25,7 @@
     "default": "你是一个情感分析助手。请分析以下日语文本的情感，从以下选项中选择最匹配的一个：{emotion_list}。\n\n角色性格参考：该角色是傲娇萌妹，日常偏害羞和平静，只在明显情绪波动时才使用对应情感。\n\n只输出情感标签的英文名称，不要输出任何其他内容。"
   },
   "translate_provider": {
-    "description": "翻译供应商。支持：openai_compat（兼容 OpenAI 格式，适用于硅基流动、DeepSeek、OpenAI 等）",
+    "description": "翻译供应商。支持：openai_compat",
     "type": "string",
     "default": "openai_compat"
   },
@@ -35,12 +35,12 @@
     "default": ""
   },
   "translate_base_url": {
-    "description": "翻译 API Base URL\n硅基流动：https://api.siliconflow.cn/v1",
+    "description": "翻译 API Base URL",
     "type": "string",
     "default": "https://api.siliconflow.cn/v1"
   },
   "translate_model": {
-    "description": "翻译模型\n推荐：deepseek-ai/DeepSeek-V3",
+    "description": "翻译模型",
     "type": "string",
     "default": "deepseek-ai/DeepSeek-V3"
   },
@@ -50,7 +50,7 @@
     "default": "你是一个日系二次元萌妹，正在把中文台词翻译成你说话的日语风格。\n\n翻译要求：\n- 用第一人称「私」或「あたし」\n- 称呼哥哥为「お兄ちゃん」\n- 语气要撒娇、可爱、带点小傲娇\n- 句尾可以适当加「～」「の」「よ」「ね」「もん」等语气词\n- 只输出翻译后的日语文本\n- 不要输出任何解释、标注、括号说明或多余内容\n- 绝对不要输出英文单词或语言标注"
   },
   "tts_provider": {
-    "description": "TTS 供应商。支持：minimax",
+    "description": "TTS 供应商。支持：minimax / openai_tts",
     "type": "string",
     "default": "minimax"
   },
@@ -60,7 +60,7 @@
     "default": ""
   },
   "minimax_group_id": {
-    "description": "MiniMax Group ID（账户管理 → 基本信息）",
+    "description": "MiniMax Group ID",
     "type": "string",
     "default": ""
   },
@@ -70,13 +70,28 @@
     "default": ""
   },
   "minimax_model": {
-    "description": "MiniMax TTS 模型，推荐 speech-2.8-turbo",
+    "description": "MiniMax TTS 模型",
     "type": "string",
     "default": "speech-2.8-turbo"
   },
-  "debug_mode": {
-    "description": "调试模式。日志以 [TTS_BRIDGE DEBUG] 为前缀输出：原始文本 / 过滤后 / 翻译后 / 清洗后 / 情感 / 发送给TTS的文本",
-    "type": "bool",
-    "default": false
+  "openai_tts_api_key": {
+    "description": "OpenAI TTS API Key",
+    "type": "string",
+    "default": ""
+  },
+  "openai_tts_base_url": {
+    "description": "OpenAI TTS Base URL（使用 OpenAI 官方填默认值即可）",
+    "type": "string",
+    "default": "https://api.openai.com/v1"
+  },
+  "openai_tts_model": {
+    "description": "OpenAI TTS 模型（如 gpt-4o-mini-tts、tts-1、tts-1-hd）",
+    "type": "string",
+    "default": "gpt-4o-mini-tts"
+  },
+  "openai_tts_voice": {
+    "description": "OpenAI TTS 音色（alloy / echo / fable / onyx / nova / shimmer）",
+    "type": "string",
+    "default": "alloy"
   }
 }
