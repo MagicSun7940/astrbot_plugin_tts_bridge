@@ -1,11 +1,12 @@
 import re
 import os
 import uuid
+import tempfile
 import httpx
 from abc import ABC, abstractmethod
 
 from astrbot.api.star import Star, register, Context
-from astrbot.api import AstrBotConfig
+from astrbot.api import AstrBotConfig, logger
 from astrbot.api.event import filter, AstrMessageEvent
 import astrbot.api.message_components as Comp
 
@@ -95,7 +96,6 @@ class TTSProvider(ABC):
 
 
 class MinimaxTTSProvider(TTSProvider):
-    """MiniMax TTS，支持情感参数"""
     def __init__(self, api_key: str, group_id: str, voice_id: str, model: str):
         self.api_key = api_key
         self.group_id = group_id
@@ -127,7 +127,6 @@ class MinimaxTTSProvider(TTSProvider):
 
 
 class OpenAITTSProvider(TTSProvider):
-    """OpenAI TTS，兼容 OpenAI 格式的供应商均可使用（emotion 参数不支持，会被忽略）"""
     def __init__(self, api_key: str, base_url: str, model: str, voice: str):
         self.api_key = api_key
         self.base_url = base_url.rstrip("/")
@@ -152,8 +151,9 @@ class OpenAITTSProvider(TTSProvider):
 
 
 def _save_audio(data: bytes, fmt: str) -> str:
-    os.makedirs("/AstrBot/data/temp", exist_ok=True)
-    path = f"/AstrBot/data/temp/tts_bridge_{uuid.uuid4().hex}.{fmt}"
+    """使用系统临时目录保存音频，避免硬编码路径"""
+    temp_dir = tempfile.gettempdir()
+    path = os.path.join(temp_dir, f"tts_bridge_{uuid.uuid4().hex}.{fmt}")
     with open(path, "wb") as f:
         f.write(data)
     return path
@@ -186,7 +186,7 @@ DEFAULT_EMOTION_PROMPT = (
 # 插件主体
 # ─────────────────────────────────────────────
 
-@register("astrbot_plugin_tts_bridge", "magic-sun", "多语言文字+语音桥接插件，支持翻译后TTS合成", "1.4.0")
+@register("astrbot_plugin_tts_bridge", "MagicSun7940", "多语言文字+语音桥接插件，支持翻译后TTS合成", "1.4.1")
 class TtsBridgePlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig):
         super().__init__(context)
@@ -195,10 +195,37 @@ class TtsBridgePlugin(Star):
         self.translate_provider: TranslateProvider = None
         self.tts_provider: TTSProvider = None
         self.emotion_detector: EmotionDetector = None
+        self._load_sessions()
         self._init_providers()
 
+    def _get_sessions_path(self) -> str:
+        data_dir = os.path.join(os.path.dirname(__file__), "data")
+        os.makedirs(data_dir, exist_ok=True)
+        return os.path.join(data_dir, "sessions.json")
+
+    def _load_sessions(self):
+        """从本地文件加载已开启的会话，重启后状态不丢失"""
+        import json
+        path = self._get_sessions_path()
+        try:
+            if os.path.exists(path):
+                with open(path, "r") as f:
+                    self.enabled_sessions = set(json.load(f))
+        except Exception as e:
+            logger.warning(f"[TTS_BRIDGE] 加载会话状态失败: {e}")
+            self.enabled_sessions = set()
+
+    def _save_sessions(self):
+        """持久化会话状态到本地文件"""
+        import json
+        path = self._get_sessions_path()
+        try:
+            with open(path, "w") as f:
+                json.dump(list(self.enabled_sessions), f)
+        except Exception as e:
+            logger.warning(f"[TTS_BRIDGE] 保存会话状态失败: {e}")
+
     def _init_providers(self):
-        # 翻译供应商
         tp = self.config.get("translate_provider", "openai_compat")
         if tp == "openai_compat":
             self.translate_provider = OpenAICompatTranslateProvider(
@@ -208,7 +235,6 @@ class TtsBridgePlugin(Star):
                 prompt=self.config.get("translate_prompt", "请将以下文本翻译成日语。只输出翻译结果，不要添加任何解释或其他内容。")
             )
 
-        # TTS 供应商
         tp2 = self.config.get("tts_provider", "minimax")
         if tp2 == "minimax":
             self.tts_provider = MinimaxTTSProvider(
@@ -225,7 +251,6 @@ class TtsBridgePlugin(Star):
                 voice=self.config.get("openai_tts_voice", "alloy")
             )
 
-        # 情感识别（仅 minimax 支持）
         if tp2 == "minimax" and self.config.get("enable_emotion", True):
             self.emotion_detector = EmotionDetector(
                 api_key=self.config.get("translate_api_key", ""),
@@ -248,11 +273,13 @@ class TtsBridgePlugin(Star):
     async def enable_tts(self, event: AstrMessageEvent):
         self._init_providers()
         self.enabled_sessions.add(event.unified_msg_origin)
+        self._save_sessions()
         yield event.plain_result("✅ 语音桥接已开启。发送 /ttsb off 可关闭。")
 
     @ttsb_group.command("off", desc="关闭当前会话的语音桥接")
     async def disable_tts(self, event: AstrMessageEvent):
         self.enabled_sessions.discard(event.unified_msg_origin)
+        self._save_sessions()
         yield event.plain_result("🔇 语音桥接已关闭。")
 
     @filter.on_llm_response()
@@ -298,4 +325,4 @@ class TtsBridgePlugin(Star):
             resp.result_chain.chain.insert(0, Comp.Record(file=audio_path))
 
         except Exception as e:
-            print(f"[TTS_BRIDGE] 失败: {e}", flush=True)
+            logger.error(f"[TTS_BRIDGE] 失败: {e}")
