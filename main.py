@@ -10,7 +10,16 @@ from astrbot.api import AstrBotConfig
 from astrbot.api.event import filter, AstrMessageEvent
 import astrbot.api.message_components as Comp
 
+# 获取 root logger 确保日志能输出
 logger = logging.getLogger("astrbot_plugin_tts_bridge")
+if not logger.handlers:
+    _handler = logging.StreamHandler()
+    _handler.setLevel(logging.DEBUG)
+    _formatter = logging.Formatter('[%(asctime)s] [%(name)s] [%(levelname)s]: %(message)s')
+    _handler.setFormatter(_formatter)
+    logger.addHandler(_handler)
+    logger.setLevel(logging.DEBUG)
+    logger.propagate = True
 
 _LANG_TAG_PATTERN = re.compile(
     r'[\(\[（【]\s*(?:japanese|japanese translation|日语|日文|ja|jp)\s*[\)\]）】]',
@@ -146,7 +155,7 @@ DEFAULT_EMOTION_PROMPT = (
 )
 
 
-@register("astrbot_plugin_tts_bridge", "magic-sun", "多语言文字+语音桥接插件，支持翻译后TTS合成", "1.3.4")
+@register("astrbot_plugin_tts_bridge", "magic-sun", "多语言文字+语音桥接插件，支持翻译后TTS合成", "1.3.5")
 class TtsBridgePlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig):
         super().__init__(context)
@@ -186,6 +195,7 @@ class TtsBridgePlugin(Star):
 
     def _debug(self, msg: str):
         if self.config.get("debug_mode", False):
+            print(f"[TTS_BRIDGE DEBUG] {msg}", flush=True)
             logger.warning(f"[TTS_BRIDGE DEBUG] {msg}")
 
     @filter.command_group("ttsb", alias=set(), desc="tts_bridge 插件")
