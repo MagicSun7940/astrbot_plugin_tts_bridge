@@ -35,23 +35,27 @@ class OpenAICompatTranslateProvider(TranslateProvider):
         self.base_url = base_url.rstrip("/")
         self.model = model
         self.prompt = prompt
+        self.client = httpx.AsyncClient(timeout=30)
 
     async def translate(self, text: str) -> str:
-        async with httpx.AsyncClient(timeout=30) as client:
-            resp = await client.post(
-                f"{self.base_url}/chat/completions",
-                headers={"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"},
-                json={
-                    "model": self.model,
-                    "messages": [
-                        {"role": "system", "content": self.prompt},
-                        {"role": "user", "content": text}
-                    ],
-                    "max_tokens": 500
-                }
-            )
-            data = resp.json()
-            return data["choices"][0]["message"]["content"].strip()
+        resp = await self.client.post(
+            f"{self.base_url}/chat/completions",
+            headers={"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"},
+            json={
+                "model": self.model,
+                "messages": [
+                    {"role": "system", "content": self.prompt},
+                    {"role": "user", "content": text}
+                ],
+                "max_tokens": 500
+            }
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        return data["choices"][0]["message"]["content"].strip()
+
+    async def close(self):
+        await self.client.aclose()
 
 
 # ─────────────────────────────────────────────
@@ -64,26 +68,30 @@ class EmotionDetector:
         self.base_url = base_url.rstrip("/")
         self.model = model
         self.prompt_template = prompt_template
+        self.client = httpx.AsyncClient(timeout=20)
 
     async def detect(self, text: str) -> str:
         emotion_list = "、".join(MINIMAX_EMOTIONS)
         system_prompt = self.prompt_template.replace("{emotion_list}", emotion_list)
-        async with httpx.AsyncClient(timeout=20) as client:
-            resp = await client.post(
-                f"{self.base_url}/chat/completions",
-                headers={"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"},
-                json={
-                    "model": self.model,
-                    "messages": [
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": text}
-                    ],
-                    "max_tokens": 20
-                }
-            )
-            data = resp.json()
-            result = data["choices"][0]["message"]["content"].strip().lower()
-            return result if result in MINIMAX_EMOTIONS else "neutral"
+        resp = await self.client.post(
+            f"{self.base_url}/chat/completions",
+            headers={"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"},
+            json={
+                "model": self.model,
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": text}
+                ],
+                "max_tokens": 20
+            }
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        result = data["choices"][0]["message"]["content"].strip().lower()
+        return result if result in MINIMAX_EMOTIONS else "neutral"
+
+    async def close(self):
+        await self.client.aclose()
 
 
 # ─────────────────────────────────────────────
@@ -95,6 +103,9 @@ class TTSProvider(ABC):
     async def synthesize(self, text: str, emotion: str = None) -> str:
         pass
 
+    async def close(self):
+        pass
+
 
 class MinimaxTTSProvider(TTSProvider):
     def __init__(self, api_key: str, group_id: str, voice_id: str, model: str):
@@ -102,29 +113,33 @@ class MinimaxTTSProvider(TTSProvider):
         self.group_id = group_id
         self.voice_id = voice_id
         self.model = model
+        self.client = httpx.AsyncClient(timeout=60)
 
     async def synthesize(self, text: str, emotion: str = None) -> str:
         voice_setting = {"voice_id": self.voice_id, "speed": 1.0, "vol": 1.0, "pitch": 0}
         if emotion and emotion in MINIMAX_EMOTIONS:
             voice_setting["emotion"] = emotion
 
-        async with httpx.AsyncClient(timeout=60) as client:
-            resp = await client.post(
-                f"https://api.minimax.chat/v1/t2a_v2?GroupId={self.group_id}",
-                headers={"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"},
-                json={
-                    "model": self.model,
-                    "text": text,
-                    "voice_setting": voice_setting,
-                    "audio_setting": {"format": "mp3", "sample_rate": 32000}
-                }
-            )
-            result = resp.json()
-            base_resp = result.get("base_resp", {})
-            if base_resp.get("status_code") != 0:
-                raise Exception(f"MiniMax TTS 错误: {base_resp.get('status_msg')}")
-            audio_bytes = bytes.fromhex(result["data"]["audio"])
-            return _save_audio(audio_bytes, "mp3")
+        resp = await self.client.post(
+            f"https://api.minimax.chat/v1/t2a_v2?GroupId={self.group_id}",
+            headers={"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"},
+            json={
+                "model": self.model,
+                "text": text,
+                "voice_setting": voice_setting,
+                "audio_setting": {"format": "mp3", "sample_rate": 32000}
+            }
+        )
+        resp.raise_for_status()
+        result = resp.json()
+        base_resp = result.get("base_resp", {})
+        if base_resp.get("status_code") != 0:
+            raise Exception(f"MiniMax TTS 错误: {base_resp.get('status_msg')}")
+        audio_bytes = bytes.fromhex(result["data"]["audio"])
+        return _save_audio(audio_bytes, "mp3")
+
+    async def close(self):
+        await self.client.aclose()
 
 
 class OpenAITTSProvider(TTSProvider):
@@ -133,26 +148,28 @@ class OpenAITTSProvider(TTSProvider):
         self.base_url = base_url.rstrip("/")
         self.model = model
         self.voice = voice
+        self.client = httpx.AsyncClient(timeout=60)
 
     async def synthesize(self, text: str, emotion: str = None) -> str:
-        async with httpx.AsyncClient(timeout=60) as client:
-            resp = await client.post(
-                f"{self.base_url}/audio/speech",
-                headers={"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"},
-                json={
-                    "model": self.model,
-                    "input": text,
-                    "voice": self.voice,
-                    "response_format": "mp3"
-                }
-            )
-            if resp.status_code != 200:
-                raise Exception(f"OpenAI TTS 错误: {resp.status_code} {resp.text}")
-            return _save_audio(resp.content, "mp3")
+        resp = await self.client.post(
+            f"{self.base_url}/audio/speech",
+            headers={"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"},
+            json={
+                "model": self.model,
+                "input": text,
+                "voice": self.voice,
+                "response_format": "mp3"
+            }
+        )
+        resp.raise_for_status()
+        return _save_audio(resp.content, "mp3")
+
+    async def close(self):
+        await self.client.aclose()
 
 
 def _save_audio(data: bytes, fmt: str) -> str:
-    """保存音频到系统临时目录，发送后自动清理"""
+    """保存音频到系统临时目录，依赖操作系统的临时文件清理机制"""
     temp_dir = tempfile.gettempdir()
     path = os.path.join(temp_dir, f"tts_bridge_{uuid.uuid4().hex}.{fmt}")
     with open(path, "wb") as f:
@@ -187,7 +204,7 @@ DEFAULT_EMOTION_PROMPT = (
 # 插件主体
 # ─────────────────────────────────────────────
 
-@register("astrbot_plugin_tts_bridge", "MagicSun7940", "多语言文字+语音桥接插件，支持翻译后TTS合成", "1.4.2")
+@register("astrbot_plugin_tts_bridge", "MagicSun7940", "多语言文字+语音桥接插件，支持翻译后TTS合成", "1.4.3")
 class TtsBridgePlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig):
         super().__init__(context)
@@ -200,13 +217,11 @@ class TtsBridgePlugin(Star):
         self._init_providers()
 
     def _get_sessions_path(self) -> str:
-        """使用框架规范的数据目录"""
         data_dir = StarTools.get_data_dir()
         data_dir.mkdir(parents=True, exist_ok=True)
         return str(data_dir / "tts_bridge_sessions.json")
 
     def _load_sessions(self):
-        """从本地文件加载已开启的会话，重启后状态不丢失"""
         path = self._get_sessions_path()
         try:
             if os.path.exists(path):
@@ -217,7 +232,6 @@ class TtsBridgePlugin(Star):
             self.enabled_sessions = set()
 
     def _save_sessions(self):
-        """持久化会话状态到本地文件"""
         path = self._get_sessions_path()
         try:
             with open(path, "w") as f:
@@ -262,6 +276,15 @@ class TtsBridgePlugin(Star):
         else:
             self.emotion_detector = None
 
+    async def terminate(self):
+        """插件卸载时关闭所有 HTTP 客户端"""
+        if self.translate_provider:
+            await self.translate_provider.close()
+        if self.tts_provider:
+            await self.tts_provider.close()
+        if self.emotion_detector:
+            await self.emotion_detector.close()
+
     @filter.command_group("ttsb", alias=set(), desc="tts_bridge 插件")
     async def ttsb_group(self, event: AstrMessageEvent):
         yield event.plain_result(HELP_TEXT)
@@ -305,7 +328,6 @@ class TtsBridgePlugin(Star):
         if not text:
             return
 
-        audio_path = None
         try:
             if self.config.get("enable_translate", True) and self.translate_provider:
                 translated = await self.translate_provider.translate(text)
@@ -329,10 +351,3 @@ class TtsBridgePlugin(Star):
 
         except Exception as e:
             logger.error(f"[TTS_BRIDGE] 失败: {e}")
-        finally:
-            # 发送完毕后清理临时音频文件，避免磁盘积累
-            if audio_path and os.path.exists(audio_path):
-                try:
-                    os.remove(audio_path)
-                except Exception:
-                    pass
