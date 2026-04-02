@@ -19,8 +19,8 @@ _LANG_TAG_PATTERN = re.compile(
     re.IGNORECASE
 )
 
-# 音频最大体积限制：10MB
 MAX_AUDIO_BYTES = 10 * 1024 * 1024
+MAX_REGEX_LEN = 500
 
 
 # ─────────────────────────────────────────────
@@ -196,6 +196,24 @@ def _save_audio(data: bytes, fmt: str) -> str:
     return path
 
 
+def _cleanup_old_audio():
+    """清理临时目录中超过1小时的 tts_bridge_*.mp3 文件"""
+    import time
+    temp_dir = tempfile.gettempdir()
+    now = time.time()
+    try:
+        for fname in os.listdir(temp_dir):
+            if fname.startswith("tts_bridge_") and fname.endswith(".mp3"):
+                fpath = os.path.join(temp_dir, fname)
+                try:
+                    if now - os.path.getmtime(fpath) > 3600:
+                        os.remove(fpath)
+                except Exception:
+                    pass
+    except Exception:
+        pass
+
+
 # ─────────────────────────────────────────────
 # 帮助文本
 # ─────────────────────────────────────────────
@@ -218,15 +236,12 @@ DEFAULT_EMOTION_PROMPT = (
     "只输出情感标签的英文名称，不要输出任何其他内容。"
 )
 
-# 正则最大长度限制，防止 ReDoS
-MAX_REGEX_LEN = 500
-
 
 # ─────────────────────────────────────────────
 # 插件主体
 # ─────────────────────────────────────────────
 
-@register("astrbot_plugin_tts_bridge", "MagicSun7940", "多语言文字+语音桥接插件，支持翻译后TTS合成", "1.4.4")
+@register("astrbot_plugin_tts_bridge", "MagicSun7940", "多语言文字+语音桥接插件，支持翻译后TTS合成", "1.4.5")
 class TtsBridgePlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig):
         super().__init__(context)
@@ -255,7 +270,6 @@ class TtsBridgePlugin(Star):
             self.enabled_sessions = set()
 
     async def _save_sessions(self):
-        """使用 asyncio.Lock 保护并发写入"""
         async with self._sessions_lock:
             path = self._get_sessions_path()
             try:
@@ -265,7 +279,6 @@ class TtsBridgePlugin(Star):
                 logger.warning(f"[TTS_BRIDGE] 保存会话状态失败: {e}")
 
     async def _close_providers(self):
-        """逐个关闭 provider，单个失败不影响其他"""
         for provider in [self.translate_provider, self.tts_provider, self.emotion_detector]:
             if provider:
                 try:
@@ -322,7 +335,7 @@ class TtsBridgePlugin(Star):
 
     @ttsb_group.command("on", desc="开启当前会话的语音桥接")
     async def enable_tts(self, event: AstrMessageEvent):
-        # 开启前校验必要配置
+        # 配置校验
         tp2 = self.config.get("tts_provider", "minimax")
         if tp2 == "minimax":
             if not self.config.get("minimax_api_key") or not self.config.get("minimax_group_id") or not self.config.get("minimax_voice_id"):
@@ -333,14 +346,11 @@ class TtsBridgePlugin(Star):
                 yield event.plain_result("❌ OpenAI TTS 配置不完整，请检查 openai_tts_api_key")
                 return
 
-        if self.config.get("enable_translate") and not self.config.get("translate_api_key"):
+        if self.config.get("enable_translate", True) and not self.config.get("translate_api_key"):
             yield event.plain_result("❌ 翻译功能已启用但未配置 translate_api_key")
             return
 
-        # 关闭旧 provider 再重建，避免客户端泄漏
-        await self._close_providers()
-        self._init_providers()
-
+        # 仅更新会话状态，不重建全局 provider，避免中断其他正在进行的请求
         async with self._sessions_lock:
             self.enabled_sessions.add(event.unified_msg_origin)
         await self._save_sessions()
@@ -358,10 +368,7 @@ class TtsBridgePlugin(Star):
         if event.unified_msg_origin not in self.enabled_sessions:
             return
 
-        text = ""
-        for comp in resp.result_chain.chain:
-            if hasattr(comp, "text"):
-                text += comp.text
+        text = "".join(comp.text for comp in resp.result_chain.chain if hasattr(comp, "text"))
         if not text:
             return
 
@@ -377,6 +384,9 @@ class TtsBridgePlugin(Star):
 
         if not text:
             return
+
+        # 每次处理时顺带清理过期临时文件
+        _cleanup_old_audio()
 
         try:
             if self.config.get("enable_translate", True) and self.translate_provider:
